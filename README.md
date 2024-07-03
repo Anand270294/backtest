@@ -24,6 +24,12 @@ trade_orders = pd.read_csv("src/data_store/order_input/aapl_demo_trade_order_v2.
 # Convert the 'order_date' column to datetime
 trade_orders["order_date"] = pd.to_datetime(trade_orders["order_date"], format="%Y-%m-%d")
 
+trade_orders["limit_offset"] = trade_orders["limit_offset"].fillna(0.0)
+trade_orders["limit_price"] = trade_orders["limit_price"].fillna(0.0)
+trade_orders["stop_price"] = trade_orders["stop_price"].fillna(0.0)
+trade_orders["trail_type"] = trade_orders["trail_type"].fillna("N.A.")
+
+
 # Fetching data for three stocks
 symbols = ["AAPL", "GOOGL", "MSFT"]
 dfs = []
@@ -48,9 +54,19 @@ backtest_engine = BacktestEngine(
 
 backtest_engine.backtest()
 order_book = backtest_engine.order_book
-order_book = order_book.sort_values(by=["order_id", "order_date"])
+order_book = order_book.sort_values(by=["order_date", "attached_order"])
 aapl = backtest_engine.stocks["AAPL"]
 aapl_trades = aapl.trades
+aapl_historical_records = aapl.holding_records
+
+# googl = backtest_engine.stocks["GOOGL"]
+# googl_trades = googl.trades
+# googl_historical_records = googl.holding_records
+
+portfolio_records = backtest_engine.combined_holding_records
+
+backtest_engine.generate_tear_down("results/teardown_report.html")
+
 
 ```
 Additional Documentation: https://docs.google.com/document/d/13Vj3Qjgm4Ls_Qh6Sily42LoXTyEOJuWBn0nKeimbm5Y/edit
