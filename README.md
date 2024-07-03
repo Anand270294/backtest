@@ -53,3 +53,4 @@ aapl = backtest_engine.stocks["AAPL"]
 aapl_trades = aapl.trades
 
 ```
+Additional Documentation: https://docs.google.com/document/d/13Vj3Qjgm4Ls_Qh6Sily42LoXTyEOJuWBn0nKeimbm5Y/edit
