@@ -115,10 +115,6 @@ class StockEntity:
             self.holding_records = pd.concat([self.holding_records, new_record])
 
         # Calculate daily returns
-        """
-        Does it make sense to track daily returns using close price? what if the po
-        """
-        # TODO: check how to calculate for short positions
         self.holding_records["daily_returns"] = self.holding_records["portfolio_value"].pct_change().fillna(0)
 
         # Correct daily returns where the previous day's portfolio value was zero

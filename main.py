@@ -40,13 +40,13 @@ backtest_engine = BacktestEngine(
 backtest_engine.backtest()
 order_book = backtest_engine.order_book
 order_book = order_book.sort_values(by=["order_date", "attached_order"])
-# aapl = backtest_engine.stocks["AAPL"]
-# aapl_trades = aapl.trades
-# aapl_historical_records = aapl.holding_records
+aapl = backtest_engine.stocks["AAPL"]
+aapl_trades = aapl.trades
+aapl_historical_records = aapl.holding_records
 
 # googl = backtest_engine.stocks["GOOGL"]
 # googl_trades = googl.trades
 # googl_historical_records = googl.holding_records
 portfolio_records = backtest_engine.combined_holding_records
 
-backtest_engine.generate_tear_down("teardown_report.html")
+backtest_engine.generate_tear_down("results/teardown_report.html")
