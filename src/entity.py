@@ -35,7 +35,7 @@ class StockEntity:
         "quantity",
     ]
 
-    HOLDING_RECORDS_COLUMNS = ["date", "closed_price", "quantity", "portfolio_value", "daily_returns"]
+    HOLDING_RECORDS_COLUMNS = ["date", "closed_price", "quantity", "portfolio_value", "daily_returns", "dividends"]
 
     def __init__(self, symbol: str):
         self.symbol = symbol
@@ -108,3 +108,46 @@ class StockEntity:
 
         # Format the daily returns to avoid negative zero
         self.holding_records["daily_returns"] = self.holding_records["daily_returns"].apply(lambda x: 0 if x == -0 else x)
+
+    def calculate_dividends(self, dividend_data):
+        """
+        Calculate dividends for a stock entity
+
+        :param stock_entity: StockEntity class for the stock
+            Holding Records Columns:
+                - Index: Date of the holding record
+                - adjusted_close: Adjusted close price of the stock
+                - quantity: Quantity of the stock held
+                - portfolio_value: Portfolio value of the stock
+                - daily_returns: Daily returns of the stock
+                - dividends: Dividends received for the stock
+        :param dividend_data: Historical dividend data for the stock
+            Dividend Data Columns:
+                - declaration_date: Date of the dividend declaration
+                - record_date: Date of the dividend record. Must hold the stock by this date to receive the dividend
+                - payment_date: Date of the dividend payment
+                - value: Dividend amount
+                - period: Period of the dividend
+                - unadjusted_value: Unadjusted dividend amount
+                - currency: Currency of the dividend
+        """
+        stock_holdings = self.holding_records
+        stock_dividends = dividend_data[dividend_data["code"] == self.symbol]
+
+        # Ensure the 'dividends' column exists in stock_holdings
+        if "dividends" not in stock_holdings.columns:
+            stock_holdings["dividends"] = 0.0
+
+        # Iterate through each dividend event
+        for _, dividend in stock_dividends.iterrows():
+            record_date = dividend["record_date"]
+            payment_date = dividend["payment_date"]
+            dividend_value = dividend["unadjusted_value"]
+
+            date_range = pd.date_range(start=record_date, end=payment_date, freq="D")
+            trading_dates = date_range.intersection(stock_holdings.index)
+
+            # Check if the stock entity held the stock on the record date
+            if (stock_holdings.loc[trading_dates, "quantity"] > 0).all():
+                # Update the 'dividends' column for the record date
+                stock_holdings.loc[record_date, "dividends"] = dividend_value * stock_holdings.loc[record_date, "quantity"]

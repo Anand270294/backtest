@@ -1,6 +1,7 @@
 # Backtest Engine
 
-Backtest Engine is a backtesting framework written in Python. Backtest Engine aims to decouple the strategies from the backtesting logic. Backtest Engine takes in various trade orders and performs backtesting
+Backtest Engine is a backtesting framework written in Python. Backtest Engine aims to decouple the strategies from the
+backtesting logic. Backtest Engine takes in various trade orders and performs backtesting
 
 ## Installation
 
@@ -28,7 +29,6 @@ trade_orders["limit_offset"] = trade_orders["limit_offset"].fillna(0.0)
 trade_orders["limit_price"] = trade_orders["limit_price"].fillna(0.0)
 trade_orders["stop_price"] = trade_orders["stop_price"].fillna(0.0)
 trade_orders["trail_type"] = trade_orders["trail_type"].fillna("N.A.")
-
 
 # Fetching data for three stocks
 symbols = ["AAPL", "GOOGL", "MSFT"]
@@ -69,4 +69,5 @@ backtest_engine.generate_tear_down("results/teardown_report.html")
 
 
 ```
+
 Additional Documentation: https://docs.google.com/document/d/13Vj3Qjgm4Ls_Qh6Sily42LoXTyEOJuWBn0nKeimbm5Y/edit

@@ -1,14 +1,16 @@
+from src.backtest_engine import BacktestEngine
+import time
 import pandas as pd
 
-pd.set_option("display.width", 320)
-pd.set_option("display.max_columns", None)
+# pd.set_option("display.width", 320)
+# pd.set_option("display.max_columns", None)
 
-import yfinance as yf
-
-from src.backtest_engine import BacktestEngine
 
 # Read Trade Order Data
-trade_orders = pd.read_csv("src/data_store/order_input/aapl_test_split.csv")
+trade_orders = pd.read_csv("src/data_store/order_input/aapl_demo_trade_order_v2.csv")
+
+# Filter only for AAPL
+trade_orders = trade_orders[trade_orders["ticker"] == "AAPL"]
 
 # Convert the 'order_date' column to datetime
 trade_orders["order_date"] = pd.to_datetime(trade_orders["order_date"], format="%Y-%m-%d")
@@ -18,22 +20,6 @@ trade_orders["limit_price"] = trade_orders["limit_price"].fillna(0.0)
 trade_orders["stop_price"] = trade_orders["stop_price"].fillna(0.0)
 trade_orders["trail_type"] = trade_orders["trail_type"].fillna("N.A.")
 trade_orders["trail"] = trade_orders["trail"].fillna(0.0)
-
-# Fetching data for stocks
-# symbols = trade_orders.ticker.unique().tolist()
-# symbols = ["AAPL"]
-# start_date = str(trade_orders.order_date.min().date())
-# end_date = str(trade_orders.order_date.max().date())
-
-# dfs = []
-
-# # Fetch and store each stock's data in a DataFrame
-# for symbol in symbols:
-#     df = yf.download('AAPL', start="2000-01-01", end="2022-10-01")
-#     # df = yf.download(symbol, start=start_date, end=end_date)
-#     df.columns = pd.MultiIndex.from_product([[symbol], df.columns])
-#     dfs.append(df)
-#
 
 combined_eod = pd.read_csv("src/data_store/stock_data/aapl_nvda_eod.csv")
 
@@ -53,7 +39,6 @@ combined_eod.rename(
     },
     inplace=True,
 )
-
 
 dfs = []
 aapl_eod = combined_eod[combined_eod["code"] == "AAPL"]
@@ -83,7 +68,13 @@ backtest_engine = BacktestEngine(
     initial_capital=100000.0,
 )
 
+start_time = time.time()
+
 backtest_engine.backtest()
+
+end_time = time.time()
+print("Execution Time: ", end_time - start_time)
+
 order_book = backtest_engine.order_book
 order_book = order_book.sort_values(by=["order_id", "order_date", "attached_order"])
 aapl = backtest_engine.stocks["AAPL"]

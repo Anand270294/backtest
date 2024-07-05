@@ -57,9 +57,7 @@ def calculate_ibkr_tiered_cost(current_month_vol, qty, price):
     clearing_fees = min(0.00020 * qty, qty * price * 0.005)
 
     # Pass Through Fees
-    nyse_pass_through_fees = (
-        sec_transaction_fee + finra_trading_activity_fee + exchange_fees + clearing_fees
-    ) * 0.000175
+    nyse_pass_through_fees = (sec_transaction_fee + finra_trading_activity_fee + exchange_fees + clearing_fees) * 0.000175
     finra_pass_through_fees = min(
         (sec_transaction_fee + finra_trading_activity_fee + exchange_fees + clearing_fees) * 0.000565,
         8.30,

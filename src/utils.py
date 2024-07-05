@@ -13,6 +13,10 @@ def get_dividend_data(unique_tickers):
     stock_dividend_data = stock_dividend_data[stock_dividend_data["code"].isin(unique_tickers)]
     stock_dividend_data["date"] = pd.to_datetime(stock_dividend_data["date"])
 
+    # TODO: check what to do if record date and payment date is null
+    stock_dividend_data = stock_dividend_data[stock_dividend_data["record_date"].notnull()]
+    stock_dividend_data = stock_dividend_data[stock_dividend_data["payment_date"].notnull()]
+
     return stock_dividend_data
 
 

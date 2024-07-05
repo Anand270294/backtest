@@ -1,17 +1,15 @@
 import typing
 from dataclasses import dataclass
-from datetime import datetime
 from typing import List
 
 import pandas as pd
+import quantstats as qs
 from tqdm import tqdm
 
 from src import constants
 from src.entity import StockEntity, Trade
 from src.ibkr_fees import calculate_ibkr_fixed_cost
-import quantstats as qs
-
-from src.utils import get_split_data
+from src.utils import get_split_data, get_dividend_data
 
 
 @dataclass
@@ -206,7 +204,7 @@ class BacktestEngine:
 
         # Add the stock symbol as a level in the DataFrame's columns
         for symbol, stock_entity in self.stocks.items():
-            stock_holding_records = stock_entity.holding_records[["quantity", "portfolio_value"]].copy()
+            stock_holding_records = stock_entity.holding_records[["quantity", "portfolio_value", "dividends"]].copy()
 
             stock_holding_records.columns = pd.MultiIndex.from_product([[symbol], stock_holding_records.columns])
             holding_records_list.append(stock_holding_records)
@@ -222,8 +220,14 @@ class BacktestEngine:
         # Calculate portfolio value (capital + all stock portfolio value) TODO: check this calculation
         sum_all_portfolio_value = combined_holding_records.xs("portfolio_value", level=1, axis=1).sum(axis=1)
 
+        # Add dividends to the portfolio value
+        sum_all_dividends = combined_holding_records.xs("dividends", level=1, axis=1).sum(axis=1)
+
         combined_holding_records[("Portfolio", "portfolio_value")] = (
-            sum_all_portfolio_value + combined_holding_records[("Portfolio", "capital")]
+            sum_all_portfolio_value
+            + sum_all_dividends
+            + combined_holding_records[("Portfolio", "capital")]
+            - combined_holding_records[("Portfolio", "total_fees")]
         )
 
         # Calculate returns
@@ -690,5 +694,10 @@ class BacktestEngine:
             # Update Portfolio Records
             self.update_portfolio_records(current_timestamp)
 
-        # Combine all the positions from all stock entities and portfolio capital
-        self.combine_holding_records()
+        # Calculate dividends
+        for symbol, stock_entity in self.stocks.items():
+            dividend_data = get_dividend_data([symbol])
+            stock_entity.calculate_dividends(dividend_data)
+
+            # Combine all the positions from all stock entities and portfolio capital
+            self.combine_holding_records()
