@@ -35,53 +35,40 @@ class StockEntity:
         "quantity",
     ]
 
-    HOLDING_RECORDS_COLUMNS = ["date", "adjusted_close", "quantity", "portfolio_value", "daily_returns"]
+    HOLDING_RECORDS_COLUMNS = ["date", "closed_price", "quantity", "portfolio_value", "daily_returns"]
 
     def __init__(self, symbol: str):
         self.symbol = symbol
         self.trades = self._initialize_dataframe(self.TRADE_COLUMNS)
         self.holding_records = self._initialize_dataframe(self.HOLDING_RECORDS_COLUMNS)
+        self.quantity = 0.0
 
     @staticmethod
     def _initialize_dataframe(columns: List[str]) -> pd.DataFrame:
         return pd.DataFrame(columns=columns)
 
-    @staticmethod
-    def calculate_pnl(
-        entry_quantity,
-        entry_price,
-        exit_quantity,
-        exit_price,
-        entry_fees,
-        exit_fees,
-        position_type,
-    ):
-
-        if position_type == constants.LONG_POSITION:
-            return (exit_quantity * exit_price) - (entry_quantity * entry_price) - entry_fees - exit_fees
-        else:
-            return (entry_quantity * entry_price) - (exit_quantity * exit_price) - entry_fees - exit_fees
-
-    def limit_order(
-        self,
-        trade: Trade,
-        high_price: float,
-        low_price: float,
-    ) -> Tuple[bool, str]:
-        if trade.action == constants.TRADE_ACTION_BUY:
-            if high_price >= trade.limit_price >= low_price:
-                self.update_trades(trade)
-                return True, ""
-        elif trade.action == constants.TRADE_ACTION_SELL:
-            if low_price <= trade.limit_price <= high_price:
-                self.update_trades(trade)
-                return True, ""
-
-        return False, "Ask/Bid price is not met"
+    def limit_order(self, trade: Trade, high_price: float, low_price: float) -> Tuple[bool, str]:
+        if trade.action == constants.TRADE_ACTION_BUY and trade.limit_price >= low_price:
+            self.update_trades(trade)
+            self.quantity += trade.quantity
+            # print(f"Limit Buy Order: Updated Quantity = {self.quantity}")
+            return True, "Order executed"
+        elif trade.action == constants.TRADE_ACTION_SELL and trade.limit_price <= high_price:
+            self.update_trades(trade)
+            self.quantity -= trade.quantity
+            # print(f"Limit Sell Order: Updated Quantity = {self.quantity}")
+            return True, "Order executed"
+        return False, "Price condition not met"
 
     def market_order(self, trade: Trade) -> Tuple[bool, str]:
         self.update_trades(trade)
-        return True, ""
+        if trade.action == constants.TRADE_ACTION_BUY:
+            self.quantity += trade.quantity
+            # print(f"Market Buy Order: Updated Quantity = {self.quantity}")
+        elif trade.action == constants.TRADE_ACTION_SELL:
+            self.quantity -= trade.quantity
+            # print(f"Market Sell Order: Updated Quantity = {self.quantity}")
+        return True, "Order executed"
 
     def update_trades(self, trade: Trade):
         # No open position, add new row to add new trade
@@ -92,21 +79,15 @@ class StockEntity:
             self.trades = pd.concat([self.trades, new_trade], ignore_index=True)
 
     def update_holding_records(self, timestamp, price):
-        long_positions = self.trades[self.trades["action"] == constants.TRADE_ACTION_BUY]
-        short_positions = self.trades[self.trades["action"] == constants.TRADE_ACTION_SELL]
-        long_position_quantity = long_positions["quantity"].sum()
-        short_position_quantity = short_positions["quantity"].sum()
-        net_position = long_position_quantity - short_position_quantity
-
         holding_records = HoldingRecords(
             date=timestamp,
             adjusted_close=price,
-            quantity=net_position,
-            portfolio_value=net_position * price,
+            quantity=self.quantity,
+            portfolio_value=self.quantity * price,
         )
 
         new_record = pd.DataFrame([holding_records.__dict__]).dropna(axis=1)
-        new_record["date"] = pd.to_datetime(new_record["date"])
+        new_record["date"] = pd.to_datetime(new_record["date"])  # TODO: set this as a type
         new_record = new_record.set_index("date")
 
         if self.holding_records.empty:
@@ -126,6 +107,4 @@ class StockEntity:
         self.holding_records.loc[short_return_indices, "daily_returns"] *= -1
 
         # Format the daily returns to avoid negative zero
-        self.holding_records["daily_returns"] = self.holding_records["daily_returns"].apply(
-            lambda x: 0 if x == -0 else x
-        )
+        self.holding_records["daily_returns"] = self.holding_records["daily_returns"].apply(lambda x: 0 if x == -0 else x)

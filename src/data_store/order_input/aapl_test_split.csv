@@ -1,0 +1,16 @@
+order_id,attached_order,order_date,ticker,order_type,action,limit_price,limit_offset,stop_price,quantity,trail_type,trail,time_in_force
+TEST_SPLIT_1,FALSE,2000-06-15,AAPL,Limit,Buy,87,,,20,,,Good Till Cancelled
+TEST_SPLIT_1,TRUE,2000-06-15,AAPL,Stop Limit,Sell,80,,80,20,,,Good Till Cancelled
+TEST_SPLIT_1,TRUE,2000-06-15,AAPL,Limit,Sell,120,,,20,,,Good Till Cancelled
+TEST_SPLIT_2,FALSE,2000-06-15,AAPL,Limit,Buy,91.2464,,,20,,,Day
+TEST_SPLIT_2,TRUE,2000-06-15,AAPL,Stop Limit,Sell,83,,83,20,,,Good Till Cancelled
+TEST_SPLIT_2,TRUE,2000-06-15,AAPL,Limit,Sell,110,,,20,,,Good Till Cancelled
+TEST_SPLIT_3,FALSE,2005-02-22,AAPL,Limit,Buy,86.3016,,,10,,,Day
+TEST_SPLIT_3,TRUE,2005-02-22,AAPL,Stop Limit,Sell,80,,80,10,,,Good Till Cancelled
+TEST_SPLIT_3,TRUE,2005-02-22,AAPL,Limit,Sell,100,,,10,,,Good Till Cancelled
+TEST_SPLIT_4,FALSE,2014-06-02,AAPL,Market,Buy,,,,30,,,Day
+TEST_SPLIT_4,TRUE,2014-06-02,AAPL,Stop Limit,Sell,550,,550,30,,,Good Till Cancelled
+TEST_SPLIT_4,TRUE,2014-06-02,AAPL,Limit,Sell,680,,,30,,,Good Till Cancelled
+TEST_SPLIT_5,FALSE,2020-08-17,AAPL,Market,Buy,,,,50,,,Day
+TEST_SPLIT_5,TRUE,2020-08-17,AAPL,Stop Limit,Sell,400,,400,50,,,Good Till Cancelled
+TEST_SPLIT_5,TRUE,2020-08-17,AAPL,Limit,Sell,600,,,50,,,Good Till Cancelled

@@ -11,6 +11,8 @@ from src.entity import StockEntity, Trade
 from src.ibkr_fees import calculate_ibkr_fixed_cost
 import quantstats as qs
 
+from src.utils import get_split_data
+
 
 @dataclass
 class Order:
@@ -22,6 +24,7 @@ class Order:
     limit_price: float
     time_in_force: str
     quantity: float
+    status: str = ""
     order_date: str = ""
     stop_price: float = 0.0
     trail_type: str = ""
@@ -162,7 +165,7 @@ class BacktestEngine:
                 "trail_type": order.trail_type,
                 "trail": order.trail,
                 "attached_order": order.attached_order,
-                "status": constants.ORDER_STATUS_PENDING,
+                "status": order.status,
                 "comments": "",
                 "filled_date": "",
             },
@@ -177,10 +180,7 @@ class BacktestEngine:
 
     def get_active_orders(self, current_timestamp):
         return self.order_book[
-            (self.order_book["order_date"] <= current_timestamp)
-            & (self.order_book["status"] != constants.ORDER_STATUS_FILLED)
-            & (self.order_book["status"] != constants.ORDER_STATUS_CANCELLED)
-            & (self.order_book["status"] != constants.ORDER_STATUS_EXPIRED)
+            (self.order_book["order_date"] <= current_timestamp) & (self.order_book["status"] == constants.ORDER_STATUS_PENDING)
         ]
 
     def initialize_stocks(self):
@@ -241,11 +241,102 @@ class BacktestEngine:
         # Create StockEntity for each stock and store in the stocks dictionary
         self.initialize_stocks()
 
+        # Set all attached order with status False status to Pending
+        self.order_book.loc[(self.order_book["attached_order"] == False), "status"] = constants.ORDER_STATUS_PENDING
+
+        # Load stock split data
+        unique_stocks = self.order_book.ticker.unique().tolist()
+        stock_split_data = get_split_data(unique_stocks)
+
         for current_timestamp, row in tqdm(self.ohlvc.iterrows(), total=len(self.ohlvc)):
             # Convert current_timestamp to pd.Timestamp type
             current_timestamp = typing.cast(pd.Timestamp, current_timestamp)
+
             # Fetch all pending orders that are earlier or equal to the current timestamp and status not filled or cancelled
             active_orders = self.get_active_orders(current_timestamp)
+
+            # Check if there is a stock split event happening
+            stock_split = stock_split_data[stock_split_data["date"] == current_timestamp]
+
+            if len(stock_split) != 0:
+                for _, split in stock_split.iterrows():
+                    stock_entity = self.stocks[split["code"]]
+                    stock_entity.quantity *= split["split_ratio"]
+
+                # Update order_book for the stock entities w stock split to adjust for price n qty
+                for idx, order in active_orders.iterrows():
+                    if order["ticker"] in stock_split["code"].tolist():
+                        split_ratio = stock_split[stock_split["code"] == order["ticker"]]["split_ratio"].values[0]
+
+                        # Set existing orders to "Cancelled" with status "Stock Split Adjustment" and create new orders to replace
+                        self.order_book.at[idx, "status"] = constants.ORDER_STATUS_SPLIT_ADJ
+                        self.order_book.at[idx, "comments"] = f"Stock Split Adjustment of {split_ratio}"
+                        self.order_book.at[idx, "filled_date"] = current_timestamp
+                        print("Stock Split Event: Creating new entry order for idx ", idx)
+
+                        # Create new order to replace the cancelled order
+                        self.create_limit_order(
+                            Order(
+                                order_id=order["order_id"],
+                                attached_order=order["attached_order"],
+                                order_date=current_timestamp.strftime(format="%Y-%m-%d %H:%M:%S"),
+                                ticker=order["ticker"],
+                                order_type=order["order_type"],
+                                action=order["action"],
+                                limit_price=order["limit_price"] / split_ratio,
+                                time_in_force=order["time_in_force"],
+                                quantity=order["quantity"] * split_ratio,
+                                stop_price=order["stop_price"] / split_ratio,
+                                trail_type=order["trail_type"],
+                                trail=(
+                                    order["trail"]
+                                    if order["trail_type"] == constants.TRAIL_TYPE_PERCENTAGE
+                                    else order["trail"] / split_ratio
+                                ),
+                                status=constants.ORDER_STATUS_PENDING,
+                            )
+                        )
+
+                        # Account for bracket orders that are not pending as the entry order is not executed yet
+                        if not order["attached_order"]:
+                            # Find index of the other attached_order with the same order id and update status to cancelled
+                            attached_order_idx_list = self.order_book[
+                                (self.order_book["order_id"] == order["order_id"]) & (self.order_book["attached_order"])
+                            ].index.tolist()
+                            if len(attached_order_idx_list) != 0:
+                                for order_idx in attached_order_idx_list:
+                                    self.order_book.loc[order_idx, "status"] = constants.ORDER_STATUS_SPLIT_ADJ
+                                    self.order_book.at[order_idx, "comments"] = f"Stock Split Adjustment of {split_ratio}"
+                                    self.order_book.loc[order_idx, "filled_date"] = current_timestamp
+
+                                    order = self.order_book.loc[order_idx]
+                                    # Create new orders to replace the cancelled attached orders
+                                    print("Stock Split Event: Creating new attached order for idx", order_idx)
+                                    self.create_limit_order(
+                                        Order(
+                                            order_id=order["order_id"],
+                                            attached_order=True,
+                                            order_date=current_timestamp.strftime(format="%Y-%m-%d %H:%M:%S"),
+                                            ticker=order["ticker"],
+                                            order_type=order["order_type"],
+                                            action=order["action"],
+                                            limit_price=order["limit_price"] / split_ratio,
+                                            time_in_force=order["time_in_force"],
+                                            quantity=order["quantity"] * split_ratio,
+                                            stop_price=order["stop_price"] / split_ratio,
+                                            trail_type=order["trail_type"],
+                                            trail=(
+                                                order["trail"]
+                                                if order["trail_type"] == constants.TRAIL_TYPE_PERCENTAGE
+                                                else order["trail"] / split_ratio
+                                            ),
+                                            status="",
+                                        )
+                                    )
+
+            # Fetch updated active orders
+            active_orders = self.get_active_orders(current_timestamp)
+
             # Using while loop because there are additional orders created and appended into the active_orders df
             while len(active_orders) != 0:
                 idx = active_orders.head(1).index[0]
@@ -331,9 +422,7 @@ class BacktestEngine:
                                     ),
                                     stop_price,
                                 )
-                                new_limit_price = (
-                                    new_stop_price + limit_offset
-                                )  # Limit Price = Stop Price - Limit Offset
+                                new_limit_price = new_stop_price + limit_offset  # Limit Price = Stop Price - Limit Offset
                                 self.order_book.at[idx, "stop_price"] = new_stop_price
                                 self.order_book.at[idx, "limit_price"] = new_limit_price
                                 # Update Active Orders stop and limit price
@@ -341,6 +430,7 @@ class BacktestEngine:
                                 active_orders.loc[idx, "limit_price"] = new_limit_price
 
                             if self.stop_loss_trigger(stop_price=stop_price, action=action, price=row[symbol]["High"]):
+                                print(f"{order_type} Triggered for idx: {idx}")
                                 self.create_limit_order(
                                     Order(
                                         order_id=order_id,
@@ -352,11 +442,13 @@ class BacktestEngine:
                                         limit_price=limit_price,
                                         time_in_force=constants.TIME_IN_FORCE_GTC,  # Defaults to GTC order for now
                                         quantity=quantity,
+                                        status=constants.ORDER_STATUS_PENDING,
                                     )
                                 )
                                 # Update the status of the current order to "Filled"
                                 self.order_book.loc[idx, "status"] = constants.ORDER_STATUS_FILLED
                                 self.order_book.loc[idx, "filled_date"] = current_timestamp
+                                self.order_book.loc[idx, "filled_price"] = stop_price
                                 new_order = self.order_book.tail(1)
                                 active_orders = pd.concat([active_orders, new_order])
 
@@ -369,9 +461,7 @@ class BacktestEngine:
                                     ),
                                     stop_price,
                                 )
-                                new_limit_price = (
-                                    new_stop_price - limit_offset
-                                )  # Limit Price = Stop Price - Limit Offset
+                                new_limit_price = new_stop_price - limit_offset  # Limit Price = Stop Price - Limit Offset
 
                                 # Update Order Book stop and limit price
                                 self.order_book.at[idx, "stop_price"] = new_stop_price
@@ -381,6 +471,7 @@ class BacktestEngine:
                                 active_orders.loc[idx, "limit_price"] = new_limit_price
 
                             if self.stop_loss_trigger(stop_price=stop_price, action=action, price=row[symbol]["Low"]):
+                                print(f"{order_type} Triggered for idx: {idx}")
                                 self.create_limit_order(
                                     Order(
                                         order_id=order_id,
@@ -392,17 +483,20 @@ class BacktestEngine:
                                         limit_price=limit_price,
                                         time_in_force=constants.TIME_IN_FORCE_GTC,  # Defaults to GTC order for now
                                         quantity=quantity,
+                                        status=constants.ORDER_STATUS_PENDING,
                                     )
                                 )
                                 # Update the status of the current order to "Filled"
                                 self.order_book.loc[idx, "status"] = constants.ORDER_STATUS_FILLED
                                 self.order_book.loc[idx, "filled_date"] = current_timestamp
+                                self.order_book.loc[idx, "filled_price"] = stop_price
                                 # Append the new order to the active orders df
                                 new_order = self.order_book.tail(1)
                                 active_orders = pd.concat([active_orders, new_order])
 
                     # Check if attached order is filled
                     if order_status:
+                        print("Order Filled for idx: ", idx)
                         self.order_book.loc[idx, "status"] = constants.ORDER_STATUS_FILLED
                         self.order_book.loc[idx, "filled_date"] = current_timestamp
                         self.order_book.loc[idx, "filled_price"] = filled_price
@@ -434,6 +528,7 @@ class BacktestEngine:
                             self.order_book.loc[idx, "status"] = constants.ORDER_STATUS_EXPIRED
                             self.order_book.loc[idx, "comments"] = "Order Expired"
                             self.order_book.loc[idx, "filled_date"] = current_timestamp
+                            print("Order Expired for idx: ", idx)
                             continue
 
                         if order_type == constants.LIMIT_ORDER:
@@ -465,12 +560,15 @@ class BacktestEngine:
                                 )
                             )
                         if order_status:
+                            print("Order Filled for idx: ", idx)
                             self.order_book.loc[idx, "status"] = constants.ORDER_STATUS_FILLED
                             self.order_book.loc[idx, "filled_date"] = current_timestamp
                             self.order_book.loc[idx, "filled_price"] = filled_price
                             # Find the attached orders and mark the status and pending
                             attached_order_idx_list = self.order_book[
-                                (self.order_book["order_id"] == order_id) & (self.order_book.index != idx)
+                                (self.order_book["order_id"] == order_id)
+                                & (self.order_book.index != idx)
+                                & (self.order_book["status"] == "")
                             ].index.tolist()
                             if len(attached_order_idx_list) != 0:
                                 # Send all the attached orders to "Pending"
@@ -537,12 +635,15 @@ class BacktestEngine:
                                     )
                                 )
                         if order_status:
+                            print("Order Filled for idx: ", idx)
                             self.order_book.loc[idx, "status"] = constants.ORDER_STATUS_FILLED
                             self.order_book.loc[idx, "filled_date"] = current_timestamp
                             self.order_book.loc[idx, "filled_price"] = filled_price
                             # Find the attached orders and mark the status and pending
                             attached_order_idx_list = self.order_book[
-                                (self.order_book["order_id"] == order_id) & (self.order_book.index != idx)
+                                (self.order_book["order_id"] == order_id)
+                                & (self.order_book.index != idx)
+                                & (self.order_book["status"] == "")
                             ].index.tolist()
                             if len(attached_order_idx_list) != 0:
                                 for order_idx in attached_order_idx_list:
@@ -564,7 +665,7 @@ class BacktestEngine:
 
             # Update Stock Records
             for ticker, stock_entity in self.stocks.items():
-                stock_entity.update_holding_records(timestamp=current_timestamp, price=row[ticker]["Adj Close"])
+                stock_entity.update_holding_records(timestamp=current_timestamp, price=row[ticker]["Close"])
 
             # Update Portfolio Records
             self.update_portfolio_records(current_timestamp)

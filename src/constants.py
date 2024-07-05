@@ -20,6 +20,7 @@ ORDER_STATUS_FILLED = "Filled"
 ORDER_STATUS_CANCELLED = "Cancelled"
 ORDER_STATUS_PENDING = "Pending"
 ORDER_STATUS_EXPIRED = "Expired"
+ORDER_STATUS_SPLIT_ADJ = "Split Adjustment"
 
 # Trade Status
 TRADE_STATUS_OPEN = "Open"
