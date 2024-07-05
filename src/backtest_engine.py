@@ -237,6 +237,89 @@ class BacktestEngine:
         returns = self.combined_holding_records[("Portfolio", "returns")]
         qs.reports.html(returns, "SPY", output=file_name)
 
+    def adjust_stock_entity_for_splits(self, split):
+        """
+        Adjust stock entity for a stock split event.
+        """
+        stock_entity = self.stocks[split["code"]]
+        stock_entity.quantity *= split["split_ratio"]
+
+    def adjust_order_for_splits(self, stock_split, order, idx, current_timestamp):
+        """
+        Adjust order book for a stock split event.
+        :param stock_split:
+        :param order:
+        :param idx:
+        :param current_timestamp:
+        :return:
+        """
+        if order["ticker"] in stock_split["code"].tolist():
+            split_ratio = stock_split[stock_split["code"] == order["ticker"]]["split_ratio"].values[0]
+
+            # Set existing orders to "Cancelled" with status "Stock Split Adjustment" and create new orders to replace
+            self.order_book.at[idx, "status"] = constants.ORDER_STATUS_SPLIT_ADJ
+            self.order_book.at[idx, "comments"] = f"Stock Split Adjustment of {split_ratio}"
+            self.order_book.at[idx, "filled_date"] = current_timestamp
+            print("Stock Split Event: Creating new entry order for idx ", idx)
+
+            # Create new order to replace the cancelled order
+            self.create_limit_order(
+                Order(
+                    order_id=order["order_id"],
+                    attached_order=order["attached_order"],
+                    order_date=current_timestamp.strftime(format="%Y-%m-%d %H:%M:%S"),
+                    ticker=order["ticker"],
+                    order_type=order["order_type"],
+                    action=order["action"],
+                    limit_price=order["limit_price"] / split_ratio,
+                    time_in_force=order["time_in_force"],
+                    quantity=order["quantity"] * split_ratio,
+                    stop_price=order["stop_price"] / split_ratio,
+                    trail_type=order["trail_type"],
+                    trail=(
+                        order["trail"] if order["trail_type"] == constants.TRAIL_TYPE_PERCENTAGE else order["trail"] / split_ratio
+                    ),
+                    status=constants.ORDER_STATUS_PENDING,
+                )
+            )
+
+            # Account for bracket orders that are not pending as the entry order is not executed yet
+            if not order["attached_order"]:
+                # Find index of the other attached_order with the same order id and update status to cancelled
+                attached_order_idx_list = self.order_book[
+                    (self.order_book["order_id"] == order["order_id"]) & (self.order_book["attached_order"])
+                ].index.tolist()
+                if len(attached_order_idx_list) != 0:
+                    for order_idx in attached_order_idx_list:
+                        self.order_book.loc[order_idx, "status"] = constants.ORDER_STATUS_SPLIT_ADJ
+                        self.order_book.at[order_idx, "comments"] = f"Stock Split Adjustment of {split_ratio}"
+                        self.order_book.loc[order_idx, "filled_date"] = current_timestamp
+
+                        order = self.order_book.loc[order_idx]
+                        # Create new orders to replace the cancelled attached orders
+                        print("Stock Split Event: Creating new attached order for idx", order_idx)
+                        self.create_limit_order(
+                            Order(
+                                order_id=order["order_id"],
+                                attached_order=True,
+                                order_date=current_timestamp.strftime(format="%Y-%m-%d %H:%M:%S"),
+                                ticker=order["ticker"],
+                                order_type=order["order_type"],
+                                action=order["action"],
+                                limit_price=order["limit_price"] / split_ratio,
+                                time_in_force=order["time_in_force"],
+                                quantity=order["quantity"] * split_ratio,
+                                stop_price=order["stop_price"] / split_ratio,
+                                trail_type=order["trail_type"],
+                                trail=(
+                                    order["trail"]
+                                    if order["trail_type"] == constants.TRAIL_TYPE_PERCENTAGE
+                                    else order["trail"] / split_ratio
+                                ),
+                                status="",
+                            )
+                        )
+
     def backtest(self):
         # Create StockEntity for each stock and store in the stocks dictionary
         self.initialize_stocks()
@@ -259,80 +342,15 @@ class BacktestEngine:
             stock_split = stock_split_data[stock_split_data["date"] == current_timestamp]
 
             if len(stock_split) != 0:
+                # Update stock entity for stock split
                 for _, split in stock_split.iterrows():
-                    stock_entity = self.stocks[split["code"]]
-                    stock_entity.quantity *= split["split_ratio"]
+                    self.adjust_stock_entity_for_splits(split)
 
                 # Update order_book for the stock entities w stock split to adjust for price n qty
                 for idx, order in active_orders.iterrows():
-                    if order["ticker"] in stock_split["code"].tolist():
-                        split_ratio = stock_split[stock_split["code"] == order["ticker"]]["split_ratio"].values[0]
-
-                        # Set existing orders to "Cancelled" with status "Stock Split Adjustment" and create new orders to replace
-                        self.order_book.at[idx, "status"] = constants.ORDER_STATUS_SPLIT_ADJ
-                        self.order_book.at[idx, "comments"] = f"Stock Split Adjustment of {split_ratio}"
-                        self.order_book.at[idx, "filled_date"] = current_timestamp
-                        print("Stock Split Event: Creating new entry order for idx ", idx)
-
-                        # Create new order to replace the cancelled order
-                        self.create_limit_order(
-                            Order(
-                                order_id=order["order_id"],
-                                attached_order=order["attached_order"],
-                                order_date=current_timestamp.strftime(format="%Y-%m-%d %H:%M:%S"),
-                                ticker=order["ticker"],
-                                order_type=order["order_type"],
-                                action=order["action"],
-                                limit_price=order["limit_price"] / split_ratio,
-                                time_in_force=order["time_in_force"],
-                                quantity=order["quantity"] * split_ratio,
-                                stop_price=order["stop_price"] / split_ratio,
-                                trail_type=order["trail_type"],
-                                trail=(
-                                    order["trail"]
-                                    if order["trail_type"] == constants.TRAIL_TYPE_PERCENTAGE
-                                    else order["trail"] / split_ratio
-                                ),
-                                status=constants.ORDER_STATUS_PENDING,
-                            )
-                        )
-
-                        # Account for bracket orders that are not pending as the entry order is not executed yet
-                        if not order["attached_order"]:
-                            # Find index of the other attached_order with the same order id and update status to cancelled
-                            attached_order_idx_list = self.order_book[
-                                (self.order_book["order_id"] == order["order_id"]) & (self.order_book["attached_order"])
-                            ].index.tolist()
-                            if len(attached_order_idx_list) != 0:
-                                for order_idx in attached_order_idx_list:
-                                    self.order_book.loc[order_idx, "status"] = constants.ORDER_STATUS_SPLIT_ADJ
-                                    self.order_book.at[order_idx, "comments"] = f"Stock Split Adjustment of {split_ratio}"
-                                    self.order_book.loc[order_idx, "filled_date"] = current_timestamp
-
-                                    order = self.order_book.loc[order_idx]
-                                    # Create new orders to replace the cancelled attached orders
-                                    print("Stock Split Event: Creating new attached order for idx", order_idx)
-                                    self.create_limit_order(
-                                        Order(
-                                            order_id=order["order_id"],
-                                            attached_order=True,
-                                            order_date=current_timestamp.strftime(format="%Y-%m-%d %H:%M:%S"),
-                                            ticker=order["ticker"],
-                                            order_type=order["order_type"],
-                                            action=order["action"],
-                                            limit_price=order["limit_price"] / split_ratio,
-                                            time_in_force=order["time_in_force"],
-                                            quantity=order["quantity"] * split_ratio,
-                                            stop_price=order["stop_price"] / split_ratio,
-                                            trail_type=order["trail_type"],
-                                            trail=(
-                                                order["trail"]
-                                                if order["trail_type"] == constants.TRAIL_TYPE_PERCENTAGE
-                                                else order["trail"] / split_ratio
-                                            ),
-                                            status="",
-                                        )
-                                    )
+                    self.adjust_order_for_splits(
+                        stock_split=stock_split, order=order, idx=idx, current_timestamp=current_timestamp
+                    )
 
             # Fetch updated active orders
             active_orders = self.get_active_orders(current_timestamp)
