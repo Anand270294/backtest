@@ -472,7 +472,6 @@ class BacktestEngine:
 
                         else:
                             if order_type in [constants.TRAILING_STOP_ORDER, constants.TRAILING_STOP_LIMIT_ORDER]:
-                                # TODO: check if we need to see if it is triggered on the same day or not
                                 new_stop_price = max(
                                     self.update_trailing_stop_price(
                                         trail_type=trail_type, trail=trail, action=action, price=row[symbol]["High"]
@@ -514,29 +513,31 @@ class BacktestEngine:
 
                     # Check if attached order is filled
                     if order_status:
-                        print("Order Filled for idx: ", idx)
-                        self.order_book.loc[idx, "status"] = constants.ORDER_STATUS_FILLED
-                        self.order_book.loc[idx, "filled_date"] = current_timestamp
-                        self.order_book.loc[idx, "filled_price"] = filled_price
-                        # Find index of the other attached_order with the same order id and update status to cancelled
-                        attached_order_idx_list = self.order_book[
-                            (self.order_book["order_id"] == order_id)
-                            & (self.order_book["status"] == constants.ORDER_STATUS_PENDING)
-                        ].index.tolist()
-                        if len(attached_order_idx_list) != 0:
-                            for order_idx in attached_order_idx_list:
-                                self.order_book.loc[order_idx, "status"] = constants.ORDER_STATUS_CANCELLED
-                                self.order_book.loc[order_idx, "comments"] = "Attached Order Cancelled"
-                                self.order_book.loc[order_idx, "filled_date"] = current_timestamp
+                        print(f"Order Filled for idx: {idx}")
+                        # Update the status, filled_date, and filled_price for the filled order
+                        self.order_book.loc[idx, ["status", "filled_date", "filled_price"]] = [
+                            constants.ORDER_STATUS_FILLED,
+                            current_timestamp,
+                            filled_price,
+                        ]
 
-                        # Update Capital and fees
+                        # Vectorized update of attached orders' status to cancelled
+                        attached_order_mask = (self.order_book["order_id"] == order_id) & (
+                            self.order_book["status"] == constants.ORDER_STATUS_PENDING
+                        )
+                        attached_order_indices = self.order_book.index[attached_order_mask].tolist()
+                        if attached_order_indices:
+                            self.order_book.loc[attached_order_indices, "status"] = constants.ORDER_STATUS_CANCELLED
+                            self.order_book.loc[attached_order_indices, "comments"] = "Attached Order Cancelled"
+                            self.order_book.loc[attached_order_indices, "filled_date"] = current_timestamp
+
+                        # Calculate fees incurred
                         fees_incurred = self.calculate_fees(qty=quantity, price_per_share=filled_price)
-                        if action == constants.TRADE_ACTION_BUY:
-                            self.current_capital -= filled_price * quantity
-                            self.current_capital -= fees_incurred
-                        else:
-                            self.current_capital += filled_price * quantity
-                            self.current_capital -= fees_incurred
+                        # Update capital based on action
+                        capital_adjustment = (
+                            -filled_price * quantity if action == constants.TRADE_ACTION_BUY else filled_price * quantity
+                        )
+                        self.current_capital += capital_adjustment - fees_incurred
                         self.fees += fees_incurred
 
                 else:
@@ -653,29 +654,30 @@ class BacktestEngine:
                                     )
                                 )
                         if order_status:
-                            print("Order Filled for idx: ", idx)
-                            self.order_book.loc[idx, "status"] = constants.ORDER_STATUS_FILLED
-                            self.order_book.loc[idx, "filled_date"] = current_timestamp
-                            self.order_book.loc[idx, "filled_price"] = filled_price
-                            # Find the attached orders and mark the status and pending
-                            attached_order_idx_list = self.order_book[
-                                (self.order_book["order_id"] == order_id)
-                                & (self.order_book.index != idx)
-                                & (self.order_book["status"] == "")
-                            ].index.tolist()
-                            if len(attached_order_idx_list) != 0:
-                                for order_idx in attached_order_idx_list:
-                                    self.order_book.loc[order_idx, "status"] = constants.ORDER_STATUS_PENDING
-                                    self.order_book.loc[order_idx, "order_date"] = current_timestamp
+                            print(f"Order Filled for idx: {idx}")
+                            # Update the status, filled_date, and filled_price for the filled order
+                            self.order_book.loc[idx, ["status", "filled_date", "filled_price"]] = [
+                                constants.ORDER_STATUS_FILLED,
+                                current_timestamp,
+                                filled_price,
+                            ]
 
-                            # Update Capital and fees
+                            # Vectorized update of attached orders' status to Pending
+                            attached_order_mask = (self.order_book["order_id"] == order_id) & (
+                                self.order_book["status"] == constants.ORDER_STATUS_PENDING
+                            )
+                            attached_order_indices = self.order_book.index[attached_order_mask].tolist()
+                            if attached_order_indices:
+                                self.order_book.loc[attached_order_indices, "status"] = constants.ORDER_STATUS_PENDING
+                                self.order_book.loc[attached_order_indices, "order_date"] = current_timestamp
+
+                            # Calculate fees incurred
                             fees_incurred = self.calculate_fees(qty=quantity, price_per_share=filled_price)
-                            if action == constants.TRADE_ACTION_BUY:
-                                self.current_capital -= filled_price * quantity
-                                self.current_capital -= fees_incurred
-                            else:
-                                self.current_capital += filled_price * quantity
-                                self.current_capital -= fees_incurred
+                            # Update capital based on action
+                            capital_adjustment = (
+                                -filled_price * quantity if action == constants.TRADE_ACTION_BUY else filled_price * quantity
+                            )
+                            self.current_capital += capital_adjustment - fees_incurred
                             self.fees += fees_incurred
 
                 # Remove row from df
